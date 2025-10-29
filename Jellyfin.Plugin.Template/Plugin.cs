@@ -1,51 +1,80 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using Jellyfin.Plugin.Template.Configuration;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Text.Json;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
-namespace Jellyfin.Plugin.Template;
-
-/// <summary>
-/// The main plugin.
-/// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+namespace Jellyfin.Plugin.Spotlight
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="Plugin"/> class.
-    /// </summary>
-    /// <param name="applicationPaths">Instance of the <see cref="IApplicationPaths"/> interface.</param>
-    /// <param name="xmlSerializer">Instance of the <see cref="IXmlSerializer"/> interface.</param>
-    public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
-        : base(applicationPaths, xmlSerializer)
+    public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
-        Instance = this;
-    }
+        public override string Name => "Spotlight";
+        public override Guid Id => Guid.Parse("a8f3c7e2-1d4b-4a9e-8f2c-3d7b5e6a9c1f");
+        public override string Description => "Discover your media with trailers on the Jellyfin homepage using dynamic spotlight";
 
-    /// <inheritdoc />
-    public override string Name => "Template";
+        public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer)
+            : base(applicationPaths, xmlSerializer)
+        {
+            Instance = this;
+            RegisterFileTransformation();
+        }
 
-    /// <inheritdoc />
-    public override Guid Id => Guid.Parse("eb5d7894-8eef-4b36-aa6f-5d124e828ce1");
+        public static Plugin? Instance { get; private set; }
 
-    /// <summary>
-    /// Gets the current plugin instance.
-    /// </summary>
-    public static Plugin? Instance { get; private set; }
-
-    /// <inheritdoc />
-    public IEnumerable<PluginPageInfo> GetPages()
-    {
-        return
-        [
-            new PluginPageInfo
+        private void RegisterFileTransformation()
+        {
+            var payload = JsonSerializer.Serialize(new
             {
-                Name = Name,
-                EmbeddedResourcePath = string.Format(CultureInfo.InvariantCulture, "{0}.Configuration.configPage.html", GetType().Namespace)
+                id = "a8f3c7e2-1d4b-4a9e-8f2c-3d7b5e6a9c1f",
+                fileNamePattern = "home-html\\..+\\.chunk\\.js$",
+                callbackAssembly = GetType().Assembly.FullName,
+                callbackClass = "Jellyfin.Plugin.Spotlight.Transformer",
+                callbackMethod = "Transform"
+            });
+
+            Assembly? fileTransformationAssembly = null;
+            foreach (var context in AssemblyLoadContext.All)
+            {
+                fileTransformationAssembly = context.Assemblies.FirstOrDefault(x =>
+                    x.FullName?.Contains(".FileTransformation") ?? false);
+                if (fileTransformationAssembly != null)
+                    break;
             }
-        ];
+
+            if (fileTransformationAssembly != null)
+            {
+                Type? pluginInterfaceType = fileTransformationAssembly.GetType("Jellyfin.Plugin.FileTransformation.PluginInterface");
+                if (pluginInterfaceType != null)
+                {
+                    pluginInterfaceType.GetMethod("RegisterTransformation")?.Invoke(null, new object?[] { payload });
+                }
+            }
+        }
+
+        public IEnumerable<PluginPageInfo> GetPages()
+        {
+            return new[]
+            {
+                new PluginPageInfo
+                {
+                    Name = "spotlight",
+                    EmbeddedResourcePath = GetType().Namespace + ".Configuration.spotlight.html"
+                },
+                new PluginPageInfo
+                {
+                    Name = "spotlightcss",
+                    EmbeddedResourcePath = GetType().Namespace + ".Configuration.spotlight.css"
+                },
+                new PluginPageInfo
+                {
+                    Name = "spotlightjs",
+                    EmbeddedResourcePath = GetType().Namespace + ".Configuration.configPage.html"
+                }
+            };
+        }
     }
 }
